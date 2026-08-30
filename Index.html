@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Crop Export Manager</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding-bottom: 70px; background: #f4f4f9; }
+    .page { display: none; padding: 20px; }
+    .active { display: block; }
+    .card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+    
+    .temp-control { text-align: center; font-size: 24px; margin: 15px 0; }
+    .temp-indicator { height: 20px; border-radius: 10px; transition: background 0.3s; }
+    
+    .bottom-nav { position: fixed; bottom: 0; width: 100%; background: #333; display: flex; justify-content: space-around; padding: 10px 0; }
+    .bottom-nav button { color: white; background: none; border: none; font-size: 14px; cursor: pointer; }
+  </style>
+</head>
+<body>
+
+  <!-- 1. AUTHENTICATION SECTION -->
+  <div id="auth-page" class="page active">
+    <h2>เข้าสู่ระบบ / ลงทะเบียน</h2>
+    <div class="card">
+      <input type="text" id="auth-username" placeholder="ชื่อผู้ใช้งาน"><br><br>
+      <input type="password" id="auth-password" placeholder="รหัสผ่าน"><br><br>
+      <button onclick="handleLogin()">เข้าสู่ระบบ / ลงทะเบียน</button>
+    </div>
+  </div>
+
+  <!-- 2. MAIN DASHBOARD & EXPORT LINE -->
+  <div id="export-page" class="page">
+    <h2>สายการส่งออกผลผลิต</h2>
+    <div class="card">
+      <p>ยินดีต้อนรับ: <b id="user-display-name">-</b></p>
+      <p>เข้าสู่ระบบล่าสุด: <span id="user-last-login">-</span></p>
+      <p>เงินทั้งหมด: $<span id="user-money">0</span></p>
+    </div>
+
+    <div class="card">
+      <h3>ควบคุมอุณหภูมิตู้แช่</h3>
+      <p>ออร์เดอร์ปัจจุบัน: <span id="current-order">โรงแรม (ต้องการเกรดสีเขียว)</span></p>
+      <div class="temp-control">
+        อุณหภูมิปัจจุบัน: <span id="temp-val">25</span>°C
+      </div>
+      <div id="temp-bar" class="temp-indicator" style="background: red;"></div>
+      <br>
+      <button onclick="changeTemp(-1)">ลดอุณหภูมิ (-1°C)</button>
+      <button onclick="changeTemp(1)">เพิ่มอุณหภูมิ (+1°C)</button>
+      <button onclick="shipCargo()" style="margin-left: 10px; background: #28a745; color: white;">ส่งออกสินค้า</button>
+    </div>
+  </div>
+
+  <!-- 3. ORDERS PAGE -->
+  <div id="orders-page" class="page">
+    <h2>คำสั่งซื้อที่เข้ามา</h2>
+    <div class="card">
+      <h4>🏨 โรงแรมหรู (ต้องการเกรดเขียว)</h4>
+      <p>อุณหภูมิที่เหมาะสม: 4°C - 8°C | จำนวน: 10,000 ตัน</p>
+    </div>
+    <div class="card">
+      <h4>🏪 ตลาดสด (ต้องการเกรดเหลือง)</h4>
+      <p>อุณหภูมิที่เหมาะสม: 9°C - 18°C | จำนวน: 50,000 ตัน</p>
+    </div>
+  </div>
+
+  <!-- 4. LEADERBOARD PAGE -->
+  <div id="leaderboard-page" class="page">
+    <h2>อันดับรายได้ผู้เล่น</h2>
+    <div id="leaderboard-list">กำลังโหลดข้อมูล...</div>
+  </div>
+
+  <!-- 5. PROFILE PAGE -->
+  <div id="profile-page" class="page">
+    <h2>โปรไฟล์ผู้ใช้งาน</h2>
+    <div class="card">
+      <p>ID: <span id="prof-id">-</span></p>
+      <p>เข้าสู่ระบบล่าสุด: <span id="prof-last-login">-</span></p>
+      <label>ชื่อที่แสดง:</label> 
+      <input type="text" id="prof-name-input">
+      <button onclick="updateProfileName()">บันทึกชื่อใหม่</button>
+    </div>
+  </div>
+
+  <!-- BOTTOM NAVIGATION BAR -->
+  <div class="bottom-nav">
+    <button onclick="showPage('export-page')">สายการส่งออก</button>
+    <button onclick="showPage('orders-page')">ออร์เดอร์</button>
+    <button onclick="showPage('leaderboard-page')">ตารางอันดับ</button>
+    <button onclick="showPage('profile-page')">โปรไฟล์</button>
+  </div>
+
+  <script>
+    const SHEETDB_URL = 'https://sheetdb.io/api/v1/my2ssyufztwjb';
+    let currentUser = null;
+    let currentTemp = 25;
+
+    function showPage(pageId) {
+      if (!currentUser && pageId !== 'auth-page') return alert('กรุณาเข้าสู่ระบบก่อน');
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.getElementById(pageId).classList.add('active');
+      if (pageId === 'leaderboard-page') fetchLeaderboard();
+    }
+
+    // 1. ระบบ Login / Register ผ่าน SheetDB
+    async function handleLogin() {
+      const user = document.getElementById('auth-username').value;
+      const pass = document.getElementById('auth-password').value;
+      if (!user || !pass) return alert('กรุณากรอกข้อมูลให้ครบถ้วน');
+
+      const nowIso = new Date().toISOString();
+      const res = await fetch(`${SHEETDB_URL}/search?Username=${user}`);
+      const data = await res.json();
+
+      if (data.length > 0) {
+        if (data[0].Password === pass) {
+          currentUser = data[0];
+          currentUser['Last Login Time'] = nowIso;
+          
+          // อัปเดตเวลาเข้าใช้งานล่าสุดลง SheetDB
+          await fetch(`${SHEETDB_URL}/User ID/${currentUser['User ID']}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: { 'Last Login Time': nowIso } })
+          });
+          
+          alert('เข้าสู่ระบบสำเร็จ!');
+        } else {
+          return alert('รหัสผ่านไม่ถูกต้อง');
+        }
+      } else {
+        const allRes = await fetch(SHEETDB_URL);
+        const allData = await allRes.json();
+        const newId = allData.length > 0 ? Number(allData[allData.length - 1]['User ID']) + 1 : 10000001;
+        
+        // ลำดับ Property: User ID -> Username -> Password -> Last Login Time -> Display Name -> Total Money
+        currentUser = {
+          'User ID': newId,
+          'Username': user,
+          'Password': pass,
+          'Last Login Time': nowIso,
+          'Display Name': user,
+          'Total Money': 1000
+        };
+
+        await fetch(SHEETDB_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: [currentUser] })
+        });
+        alert('ลงทะเบียนสำเร็จ!');
+      }
+
+      updateUserUI();
+      showPage('export-page');
+    }
+
+    function updateUserUI() {
+      document.getElementById('user-display-name').innerText = currentUser['Display Name'];
+      document.getElementById('user-last-login').innerText = currentUser['Last Login Time'];
+      document.getElementById('user-money').innerText = Number(currentUser['Total Money']).toLocaleString();
+      document.getElementById('prof-id').innerText = currentUser['User ID'];
+      document.getElementById('prof-last-login').innerText = currentUser['Last Login Time'];
+      document.getElementById('prof-name-input').value = currentUser['Display Name'];
+    }
+
+    async function updateProfileName() {
+      const newName = document.getElementById('prof-name-input').value;
+      currentUser['Display Name'] = newName;
+      
+      await fetch(`${SHEETDB_URL}/User ID/${currentUser['User ID']}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: { 'Display Name': newName } })
+      });
+      
+      updateUserUI();
+      alert('อัปเดตชื่อสำเร็จ');
+    }
+
+    function changeTemp(delta) {
+      currentTemp += delta;
+      document.getElementById('temp-val').innerText = currentTemp;
+      const bar = document.getElementById('temp-bar');
+
+      if (currentTemp >= 4 && currentTemp <= 8) {
+        bar.style.background = 'green';
+      } else if (currentTemp >= 9 && currentTemp <= 18) {
+        bar.style.background = 'yellow';
+      } else {
+        bar.style.background = 'red';
+      }
+    }
+
+    async function shipCargo() {
+      let reward = 0;
+      if (currentTemp >= 4 && currentTemp <= 8) {
+        reward = 50000;
+        alert('ส่งออกสำเร็จ! เกรดสีเขียว (โรงแรม) ได้รับเงิน $' + reward);
+      } else if (currentTemp >= 9 && currentTemp <= 18) {
+        reward = 15000;
+        alert('ส่งออกสำเร็จ! เกรดสีเหลือง (ตลาดสด) ได้รับเงิน $' + reward);
+      } else {
+        alert('ส่งออกล้มเหลว! สินค้าเน่าเสีย (เกรดสีแดง)');
+      }
+
+      if (reward > 0) {
+        currentUser['Total Money'] = Number(currentUser['Total Money']) + reward;
+        updateUserUI();
+        
+        await fetch(`${SHEETDB_URL}/User ID/${currentUser['User ID']}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: { 'Total Money': currentUser['Total Money'] } })
+        });
+      }
+    }
+
+    async function fetchLeaderboard() {
+      const res = await fetch(SHEETDB_URL);
+      const data = await res.json();
+      
+      data.sort((a, b) => Number(b['Total Money']) - Number(a['Total Money']));
+
+      let html = '<ol>';
+      data.forEach(player => {
+        html += `<li><b>${player['Display Name']}</b>: $${Number(player['Total Money']).toLocaleString()}</li>`;
+      });
+      html += '</ol>';
+      document.getElementById('leaderboard-list').innerHTML = html;
+    }
+  </script>
+</body>
+</html>
